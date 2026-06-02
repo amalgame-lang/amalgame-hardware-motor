@@ -103,6 +103,18 @@ public class Program {
         bz.Tone(440, 5)
         if (bp.PeriodOf() > 0) { Console.WriteLine("[PASS] buzzer tone") } else { Console.WriteLine("[FAIL] buzzer tone"); fail = fail + 1 }
 
+        // AccelStepper: 20 steps fwd → 40 STEP edges, DIR high, position 20.
+        let astp: FakeOut = new FakeOut()
+        let adr:  FakeOut = new FakeOut()
+        let acc: AccelStepper = new AccelStepper(astp, adr, new FakeClock())
+        acc.SetSpeedRange(2000, 400)
+        acc.SetRampSteps(5)
+        let pos: int = acc.MoveSteps(20)
+        if (pos == 20 && astp.Ops() == 40 && adr.StateOf() == 1) { Console.WriteLine("[PASS] accelstepper +20 (pos=" + String_FromInt(pos) + ")") } else { Console.WriteLine("[FAIL] accelstepper pos=" + String_FromInt(pos) + " ops=" + String_FromInt(astp.Ops())); fail = fail + 1 }
+        // Reverse back to 0 via MoveTo → DIR low, position 0.
+        acc.MoveTo(0)
+        if (acc.Position() == 0 && adr.StateOf() == 0) { Console.WriteLine("[PASS] accelstepper back to 0") } else { Console.WriteLine("[FAIL] accelstepper back pos=" + String_FromInt(acc.Position())); fail = fail + 1 }
+
         if (fail == 0) { Console.WriteLine("motor: all good") }
     }
 }

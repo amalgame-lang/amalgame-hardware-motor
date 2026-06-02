@@ -13,7 +13,7 @@
 
 [package]
 name              = "amalgame-hardware-motor"
-version           = "0.3.0"
+version           = "0.4.0"
 license           = "Apache-2.0"
 description       = "Portable motor/actuator drivers (servo/ESC, DC via H-bridge, 28BYJ-48 stepper, relay) over Amalgame.Hal — one driver, runs on Raspberry Pi and future MCU backends. For drones, 3D printers, robots."
 authors           = ["Bastien Mouget"]
@@ -21,7 +21,7 @@ required-amalgame = ">=0.8.72"
 schema-version    = 1
 
 [stdlib]
-classes   = ["Servo", "DcMotor", "Stepper", "Relay", "Pca9685", "Pca9685Channel", "A4988", "Buzzer"]
+classes   = ["Servo", "DcMotor", "Stepper", "Relay", "Pca9685", "Pca9685Channel", "A4988", "Buzzer", "AccelStepper"]
 header    = "facade-stub.h"
 namespace = "Amalgame.Hardware.Motor"
 facade    = "facade.am"
