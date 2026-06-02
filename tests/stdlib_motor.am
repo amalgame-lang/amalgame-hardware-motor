@@ -37,6 +37,18 @@ public class FakeClock implements Clock {
     public int Micros() { return 0 }
 }
 
+public class FakeI2c implements I2cBus {
+    private writes: int
+    public FakeI2c() { this.writes = 0 }
+    public bool WriteByte(addr: int, value: int) { this.writes = this.writes + 1; return true }
+    public int  ReadByte(addr: int) { return 0 }
+    public bool WriteReg(addr: int, reg: int, value: int) { this.writes = this.writes + 1; return true }
+    public int  ReadReg(addr: int, reg: int) { return 0 }
+    public bool WriteBytes(addr: int, bytes: List<int>) { this.writes = this.writes + 1; return true }
+    public List<int> ReadBytes(addr: int, count: int) { let l: List<int> = new List<int>(); return l }
+    public int Writes() { return this.writes }
+}
+
 public class Program {
     public static void Main(string[] args) {
         var fail: int = 0
@@ -68,6 +80,13 @@ public class Program {
         if (a.StateOf() == 1 && b.StateOf() == 1 && c.StateOf() == 0) { Console.WriteLine("[PASS] stepper phase1") } else { Console.WriteLine("[FAIL] stepper phase1"); fail = fail + 1 }
         st.Release()
         if (a.StateOf() == 0 && b.StateOf() == 0) { Console.WriteLine("[PASS] stepper release") } else { Console.WriteLine("[FAIL] stepper release"); fail = fail + 1 }
+
+        // PCA9685: a channel is a PwmOut → drives a Servo over I2C.
+        let i2c: FakeI2c = new FakeI2c()
+        let pca: Pca9685 = new Pca9685(i2c, 0x40, new FakeClock())
+        let sv: Servo = new Servo(pca.Channel(0))   // concrete→PwmOut coercion
+        sv.Write(90)
+        if (i2c.Writes() > 0) { Console.WriteLine("[PASS] pca9685 drives servo over i2c (" + String_FromInt(i2c.Writes()) + " writes)") } else { Console.WriteLine("[FAIL] pca9685 no writes"); fail = fail + 1 }
 
         if (fail == 0) { Console.WriteLine("motor: all good") }
     }
