@@ -259,3 +259,62 @@ public class Pca9685Channel implements PwmOut {
     public bool Enable()  { return true }                          // always driven
     public bool Disable() { this.ctl.SetCounts(this.ch, 0, 0); return true }
 }
+
+// A4988 / DRV8825 — step/dir stepper driver (CNC, 3D printers, linear
+// stages). Pulse STEP to advance; DIR sets direction. Microstepping is
+// set by the MS1..MS3 pins on the board (wire them as you like).
+//
+//     let m = new A4988(new GpioOut(20), new GpioOut(21), new SysClock())
+//     m.Step(200, 800)                 // 200 steps fwd, 800µs/step
+public class A4988 {
+    private step: DigitalOut
+    private dir:  DigitalOut
+    private clk:  Clock
+
+    public A4988(step: DigitalOut, dir: DigitalOut, clk: Clock) {
+        this.step = step
+        this.dir  = dir
+        this.clk  = clk
+    }
+
+    // Step `count` (negative = reverse), `pulseUs` per half-period.
+    public void Step(count: int, pulseUs: int) {
+        var n: int = count
+        if (n < 0) { this.dir.Low(); n = 0 - n } else { this.dir.High() }
+        this.clk.DelayUs(2)    // DIR setup time
+        var i: int = 0
+        while (i < n) {
+            this.step.High()
+            this.clk.DelayUs(pulseUs)
+            this.step.Low()
+            this.clk.DelayUs(pulseUs)
+            i = i + 1
+        }
+    }
+}
+
+// Passive buzzer on a PWM line — beeps and tones. Drive it from a Pwm
+// pin or a Pca9685 channel (both are PwmOut).
+//
+//     let bz = new Buzzer(new Pwm(0, 0), new SysClock())
+//     bz.Tone(440, 200)               // A4, 200 ms
+public class Buzzer {
+    private pwm: PwmOut
+    private clk: Clock
+
+    public Buzzer(pwm: PwmOut, clk: Clock) {
+        this.pwm = pwm
+        this.clk = clk
+    }
+
+    // Play `freqHz` for `ms` milliseconds (square wave, 50% duty).
+    public void Tone(freqHz: int, ms: int) {
+        if (freqHz <= 0) { this.clk.DelayMs(ms); return }
+        let _f: bool = this.pwm.SetFrequency(freqHz, 50)
+        let _e: bool = this.pwm.Enable()
+        this.clk.DelayMs(ms)
+        let _d: bool = this.pwm.Disable()
+    }
+
+    public void Beep() { this.Tone(2000, 100) }
+}
