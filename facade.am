@@ -318,3 +318,79 @@ public class Buzzer {
 
     public void Beep() { this.Tone(2000, 100) }
 }
+
+// AccelStepper — smooth trapezoidal acceleration for any step/dir driver
+// (A4988, DRV8825, TB6600…). Constant-speed stepping jerks the load and
+// stalls high-inertia axes; this ramps the step interval up to speed and
+// back down before the target, the staple of 3D printers / CNC / plotters.
+//
+//     let s = new AccelStepper(new GpioOut(20), new GpioOut(21), new SysClock())
+//     s.SetSpeedRange(2000, 300)   // start 2000 µs/step → cruise 300 µs/step
+//     s.SetRampSteps(80)           // accelerate over 80 steps
+//     s.MoveSteps(800)             // blocking move, +800 steps (- = reverse)
+//     let pos = s.Position()
+public class AccelStepper {
+    private step:       DigitalOut
+    private dir:        DigitalOut
+    private clk:        Clock
+    private position:   int
+    private startDelay: int   // µs/step at rest (slowest)
+    private minDelay:   int   // µs/step at cruise (fastest)
+    private rampSteps:  int   // steps to go from start to cruise
+
+    public AccelStepper(step: DigitalOut, dir: DigitalOut, clk: Clock) {
+        this.step = step
+        this.dir  = dir
+        this.clk  = clk
+        this.position   = 0
+        this.startDelay = 2000
+        this.minDelay   = 400
+        this.rampSteps  = 50
+    }
+
+    public void SetSpeedRange(startUs: int, minUs: int) {
+        this.startDelay = startUs
+        this.minDelay   = minUs
+    }
+    public void SetRampSteps(n: int) { if (n > 0) { this.rampSteps = n } }
+    public int  Position() { return this.position }
+    public void SetPosition(p: int) { this.position = p }
+
+    // Step interval (µs) at step index `i` of a move of length `n`:
+    // ramp up over the first rampSteps, ramp down over the last rampSteps,
+    // cruise at minDelay between. Linear in step-space (good enough, no
+    // floats). Short moves (n < 2*ramp) make a triangle, never reaching
+    // cruise.
+    private int DelayAt(i: int, n: int) {
+        var fromEnd: int = n - 1 - i
+        var edge: int = i
+        if (fromEnd < edge) { edge = fromEnd }      // distance to nearest end
+        if (edge >= this.rampSteps) { return this.minDelay }
+        let span: int = this.startDelay - this.minDelay
+        // edge=0 → startDelay ; edge=rampSteps → minDelay.
+        return this.startDelay - (span * edge) / this.rampSteps
+    }
+
+    // Blocking move of `count` steps (negative = reverse). Returns the
+    // new absolute position.
+    public int MoveSteps(count: int) {
+        var n: int = count
+        var sign: int = 1
+        if (n < 0) { this.dir.Low(); n = 0 - n; sign = 0 - 1 } else { this.dir.High() }
+        this.clk.DelayUs(2)        // DIR setup
+        var i: int = 0
+        while (i < n) {
+            let d: int = this.DelayAt(i, n)
+            this.step.High()
+            this.clk.DelayUs(2)
+            this.step.Low()
+            this.clk.DelayUs(d)
+            this.position = this.position + sign
+            i = i + 1
+        }
+        return this.position
+    }
+
+    // Move to an absolute target position.
+    public int MoveTo(target: int) { return this.MoveSteps(target - this.position) }
+}

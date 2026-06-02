@@ -24,5 +24,6 @@ st.Step(2048, 2)                  // 28BYJ-48: ~half a revolution, 2ms/step
 | `DcMotor(in1,in2: DigitalOut, en: PwmOut)` | `Forward(%)` / `Reverse(%)` / `Stop()` / `Brake()` |
 | `Stepper(c1..c4: DigitalOut, clk: Clock)` | `Step(count, delayMs)` / `Release()` |
 | `Relay(out: DigitalOut)` | `On()` / `Off()` / `Set(on)` / `SetActiveHigh(b)` |
+| `AccelStepper(step, dir: DigitalOut, clk: Clock)` | `MoveSteps(n)`, `MoveTo(target)`, `SetSpeedRange(startUs, minUs)`, `SetRampSteps(n)`, `Position()` — trapezoidal accel |
 
-Requires amc ≥ 0.8.72. Apache-2.0.
+Requires amc ≥ 0.8.73. Apache-2.0.
