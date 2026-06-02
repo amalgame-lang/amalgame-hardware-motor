@@ -1,0 +1,174 @@
+namespace Amalgame.Hardware.Motor
+
+// ── Amalgame.Hardware.Motor — portable motor/actuator drivers ──
+//
+// Written once against Amalgame.Hal, so the same drivers run on a
+// Raspberry Pi (amalgame-hardware-gpio backend) and on a future MCU
+// backend. Servos/ESCs for drones, steppers for 3D printers/CNC, DC
+// motors via H-bridge for robots, relays for switching.
+//
+//     import Amalgame.Hardware          // Pwm, GpioOut, SysClock (Pi)
+//     import Amalgame.Hardware.Motor
+//
+//     let s = new Servo(new Pwm(0, 0))
+//     s.Write(90)                       // centre
+//
+//     let st = new Stepper(new GpioOut(17), new GpioOut(18),
+//                          new GpioOut(27), new GpioOut(22), new SysClock())
+//     st.Step(2048, 2)                  // one revolution (28BYJ-48), 2ms/step
+
+import Amalgame.Hal
+
+// Hobby servo / ESC on a 50 Hz PWM line. Angle 0..180° maps to a
+// 1.0–2.0 ms pulse by default (calibrate with SetRange). An ESC reads
+// the same 1–2 ms band as 0–100% throttle, so Servo drives both.
+public class Servo {
+    private pwm:   PwmOut
+    private minUs: int
+    private maxUs: int
+
+    public Servo(pwm: PwmOut) {
+        this.pwm   = pwm
+        this.minUs = 1000
+        this.maxUs = 2000
+        let _p: bool = this.pwm.SetPeriod(20000000)   // 20 ms → 50 Hz
+        let _e: bool = this.pwm.Enable()
+    }
+
+    // Calibrate the pulse range in microseconds (default 1000..2000).
+    public void SetRange(minUs: int, maxUs: int) {
+        this.minUs = minUs
+        this.maxUs = maxUs
+    }
+
+    // Move to `angle` degrees (0..180).
+    public void Write(angle: int) {
+        var a: int = angle
+        if (a < 0)   { a = 0 }
+        if (a > 180) { a = 180 }
+        let span:    int = this.maxUs - this.minUs
+        let pulseUs: int = this.minUs + (a * span) / 180
+        let _d: bool = this.pwm.SetDuty(pulseUs * 1000)   // µs → ns
+    }
+
+    // ESC throttle 0..100 % (alias over the same 1–2 ms band).
+    public void Throttle(percent: int) {
+        var p: int = percent
+        if (p < 0)   { p = 0 }
+        if (p > 100) { p = 100 }
+        this.Write((p * 180) / 100)
+    }
+}
+
+// DC motor on an H-bridge: two direction lines + one PWM enable
+// (L298N / DRV8833 / TB6612). Speed is 0..100 %.
+public class DcMotor {
+    private in1: DigitalOut
+    private in2: DigitalOut
+    private en:  PwmOut
+
+    public DcMotor(in1: DigitalOut, in2: DigitalOut, en: PwmOut) {
+        this.in1 = in1
+        this.in2 = in2
+        this.en  = en
+    }
+
+    public void Forward(speedPct: int) {
+        this.in1.High()
+        this.in2.Low()
+        let _s: bool = this.en.SetFrequency(1000, speedPct)
+        let _e: bool = this.en.Enable()
+    }
+
+    public void Reverse(speedPct: int) {
+        this.in1.Low()
+        this.in2.High()
+        let _s: bool = this.en.SetFrequency(1000, speedPct)
+        let _e: bool = this.en.Enable()
+    }
+
+    // Coast (free spin). Brake() shorts both lines for active braking.
+    public void Stop()  { let _d: bool = this.en.Disable(); this.in1.Low();  this.in2.Low() }
+    public void Brake() { this.in1.High(); this.in2.High(); let _s: bool = this.en.SetFrequency(1000, 100); let _e: bool = this.en.Enable() }
+}
+
+// Unipolar stepper (28BYJ-48 + ULN2003): four coil lines, half-step
+// drive (4096 half-steps / revolution). Needs a Clock to pace steps.
+public class Stepper {
+    private c1:    DigitalOut
+    private c2:    DigitalOut
+    private c3:    DigitalOut
+    private c4:    DigitalOut
+    private clk:   Clock
+    private phase: int
+
+    public Stepper(c1: DigitalOut, c2: DigitalOut, c3: DigitalOut, c4: DigitalOut, clk: Clock) {
+        this.c1    = c1
+        this.c2    = c2
+        this.c3    = c3
+        this.c4    = c4
+        this.clk   = clk
+        this.phase = 0
+    }
+
+    // Step `count` half-steps (negative = reverse), waiting `delayMs`
+    // between each (≈2 ms is a safe floor for the 28BYJ-48).
+    public void Step(count: int, delayMs: int) {
+        var n:   int = count
+        var dir: int = 1
+        if (n < 0) { dir = 0 - 1; n = 0 - n }
+        var i: int = 0
+        while (i < n) {
+            this.phase = (this.phase + dir + 8) % 8
+            this.ApplyPhase(this.phase)
+            this.clk.DelayMs(delayMs)
+            i = i + 1
+        }
+    }
+
+    // De-energize all coils (stop holding torque, save power/heat).
+    public void Release() {
+        this.c1.Low()
+        this.c2.Low()
+        this.c3.Low()
+        this.c4.Low()
+    }
+
+    // Half-step coil table (8 phases). c1:{0,1,7} c2:{1,2,3}
+    // c3:{3,4,5} c4:{5,6,7}.
+    private void ApplyPhase(p: int) {
+        this.Coil(this.c1, p == 0 || p == 1 || p == 7)
+        this.Coil(this.c2, p == 1 || p == 2 || p == 3)
+        this.Coil(this.c3, p == 3 || p == 4 || p == 5)
+        this.Coil(this.c4, p == 5 || p == 6 || p == 7)
+    }
+
+    private void Coil(pin: DigitalOut, on: bool) {
+        if (on) { pin.High() } else { pin.Low() }
+    }
+}
+
+// A relay / MOSFET switch on one digital line. `activeHigh=false` for
+// boards that switch on a LOW (common on opto-isolated relay boards).
+public class Relay {
+    private out:        DigitalOut
+    private activeHigh: bool
+
+    public Relay(out: DigitalOut) {
+        this.out        = out
+        this.activeHigh = true
+        this.Off()
+    }
+
+    public void SetActiveHigh(v: bool) { this.activeHigh = v }
+
+    public void On() {
+        if (this.activeHigh) { this.out.High() } else { this.out.Low() }
+    }
+    public void Off() {
+        if (this.activeHigh) { this.out.Low() } else { this.out.High() }
+    }
+    public void Set(on: bool) {
+        if (on) { this.On() } else { this.Off() }
+    }
+}
