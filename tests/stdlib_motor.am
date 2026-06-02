@@ -21,12 +21,14 @@ public class FakePwm implements PwmOut {
 
 public class FakeOut implements DigitalOut {
     private state: int
-    public FakeOut() { this.state = 0 }
-    public void Write(level: int) { this.state = level }
-    public void High() { this.state = 1 }
-    public void Low()  { this.state = 0 }
-    public void Toggle() { if (this.state == 1) { this.state = 0 } else { this.state = 1 } }
+    private ops:   int
+    public FakeOut() { this.state = 0; this.ops = 0 }
+    public void Write(level: int) { this.state = level; this.ops = this.ops + 1 }
+    public void High() { this.state = 1; this.ops = this.ops + 1 }
+    public void Low()  { this.state = 0; this.ops = this.ops + 1 }
+    public void Toggle() { if (this.state == 1) { this.state = 0 } else { this.state = 1 }; this.ops = this.ops + 1 }
     public int StateOf() { return this.state }
+    public int Ops() { return this.ops }
 }
 
 public class FakeClock implements Clock {
@@ -87,6 +89,19 @@ public class Program {
         let sv: Servo = new Servo(pca.Channel(0))   // concrete→PwmOut coercion
         sv.Write(90)
         if (i2c.Writes() > 0) { Console.WriteLine("[PASS] pca9685 drives servo over i2c (" + String_FromInt(i2c.Writes()) + " writes)") } else { Console.WriteLine("[FAIL] pca9685 no writes"); fail = fail + 1 }
+
+        // A4988: 5 steps fwd → 10 STEP edges, DIR high.
+        let stp: FakeOut = new FakeOut()
+        let dr:  FakeOut = new FakeOut()
+        let a49: A4988 = new A4988(stp, dr, new FakeClock())
+        a49.Step(5, 0)
+        if (stp.Ops() == 10 && dr.StateOf() == 1) { Console.WriteLine("[PASS] a4988 5 steps") } else { Console.WriteLine("[FAIL] a4988 ops=" + String_FromInt(stp.Ops())); fail = fail + 1 }
+
+        // Buzzer: Tone sets the PWM frequency/duty + enables.
+        let bp: FakePwm = new FakePwm()
+        let bz: Buzzer = new Buzzer(bp, new FakeClock())
+        bz.Tone(440, 5)
+        if (bp.PeriodOf() > 0) { Console.WriteLine("[PASS] buzzer tone") } else { Console.WriteLine("[FAIL] buzzer tone"); fail = fail + 1 }
 
         if (fail == 0) { Console.WriteLine("motor: all good") }
     }
