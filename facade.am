@@ -172,3 +172,90 @@ public class Relay {
         if (on) { this.On() } else { this.Off() }
     }
 }
+
+// PCA9685 — 16-channel 12-bit PWM driver over I²C (addr 0x40). THE
+// servo/LED expander for robot arms, hexapods, multirotor gimbals: 16
+// channels from two I²C wires. Each channel is exposed as a PwmOut via
+// Channel(i), so it drops straight into Servo / DcMotor / RgbLed.
+//
+//     let pca = new Pca9685(new I2c(1), 0x40, new SysClock())
+//     pca.SetFreqHz(50)                     // servo rate (shared by all)
+//     let s0 = new Servo(pca.Channel(0))    // 16 servos on one bus
+//     s0.Write(90)
+//
+// Note: the PWM frequency is shared across all 16 channels (one
+// prescaler) — fine for an all-servos or all-LEDs setup.
+public class Pca9685 {
+    private bus:      I2cBus
+    private addr:     int
+    private clk:      Clock
+    private periodNs: int
+
+    public Pca9685(bus: I2cBus, addr: int, clk: Clock) {
+        this.bus = bus
+        this.addr = addr
+        this.clk = clk
+        this.periodNs = 20000000   // assume 50 Hz until SetFreqHz
+        let _m: bool = this.bus.WriteReg(this.addr, 0x00, 0x00)   // MODE1 normal
+        this.SetFreqHz(50)
+    }
+
+    // Set the shared PWM frequency (24..1526 Hz).
+    public void SetFreqHz(hz: int) {
+        if (hz <= 0) { return }
+        this.periodNs = 1000000000 / hz
+        var prescale: int = (25000000 / (4096 * hz)) - 1
+        if (prescale < 3)   { prescale = 3 }
+        if (prescale > 255) { prescale = 255 }
+        let _sleep: bool = this.bus.WriteReg(this.addr, 0x00, 0x10)   // sleep
+        let _pre:   bool = this.bus.WriteReg(this.addr, 0xFE, prescale)
+        let _wake:  bool = this.bus.WriteReg(this.addr, 0x00, 0x00)
+        this.clk.DelayUs(500)
+        let _ai: bool = this.bus.WriteReg(this.addr, 0x00, 0xA0)      // restart + auto-increment
+    }
+
+    public int PeriodNs() { return this.periodNs }
+
+    // Set a channel's 12-bit on/off counts (0..4095).
+    public void SetCounts(ch: int, on: int, off: int) {
+        if (ch < 0 || ch > 15) { return }
+        let base: int = 0x06 + 4 * ch
+        let _0: bool = this.bus.WriteReg(this.addr, base,     on % 256)
+        let _1: bool = this.bus.WriteReg(this.addr, base + 1, on / 256)
+        let _2: bool = this.bus.WriteReg(this.addr, base + 2, off % 256)
+        let _3: bool = this.bus.WriteReg(this.addr, base + 3, off / 256)
+    }
+
+    // A PwmOut view of one channel — hand it to Servo / DcMotor / etc.
+    public Pca9685Channel Channel(ch: int) {
+        return new Pca9685Channel(this, ch)
+    }
+}
+
+// One PCA9685 channel as a PwmOut (created via Pca9685.Channel).
+public class Pca9685Channel implements PwmOut {
+    private ctl: Pca9685
+    private ch:  int
+
+    public Pca9685Channel(ctl: Pca9685, ch: int) {
+        this.ctl = ctl
+        this.ch  = ch
+    }
+
+    public bool SetFrequency(hz: int, dutyPercent: int) {
+        this.ctl.SetFreqHz(hz)
+        this.ctl.SetCounts(this.ch, 0, (4096 * dutyPercent) / 100)
+        return true
+    }
+    public bool SetPeriod(ns: int) {
+        if (ns > 0) { this.ctl.SetFreqHz(1000000000 / ns) }
+        return true
+    }
+    public bool SetDuty(ns: int) {
+        let off: int = (ns * 4096) / this.ctl.PeriodNs()
+        this.ctl.SetCounts(this.ch, 0, off)
+        return true
+    }
+    public bool Enable()  { return true }                          // always driven
+    public bool Disable() { this.ctl.SetCounts(this.ch, 0, 0); return true }
+}
