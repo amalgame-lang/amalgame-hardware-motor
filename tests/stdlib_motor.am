@@ -1,0 +1,74 @@
+// Test motor drivers against fake HAL backends (no hardware).
+
+namespace Tests
+
+import Amalgame.Hal
+import Amalgame.Hardware.Motor
+
+public class FakePwm implements PwmOut {
+    private period: int
+    private duty:   int
+    private en:     int
+    public FakePwm() { this.period = 0; this.duty = 0; this.en = 0 }
+    public bool SetFrequency(hz: int, dutyPercent: int) { this.period = 1000000000 / hz; this.duty = (this.period * dutyPercent) / 100; return true }
+    public bool SetPeriod(ns: int) { this.period = ns; return true }
+    public bool SetDuty(ns: int)   { this.duty = ns; return true }
+    public bool Enable()  { this.en = 1; return true }
+    public bool Disable() { this.en = 0; return true }
+    public int DutyOf()   { return this.duty }
+    public int PeriodOf() { return this.period }
+}
+
+public class FakeOut implements DigitalOut {
+    private state: int
+    public FakeOut() { this.state = 0 }
+    public void Write(level: int) { this.state = level }
+    public void High() { this.state = 1 }
+    public void Low()  { this.state = 0 }
+    public void Toggle() { if (this.state == 1) { this.state = 0 } else { this.state = 1 } }
+    public int StateOf() { return this.state }
+}
+
+public class FakeClock implements Clock {
+    public FakeClock() { }
+    public void DelayMs(ms: int) { }
+    public void DelayUs(us: int) { }
+    public int Millis() { return 0 }
+    public int Micros() { return 0 }
+}
+
+public class Program {
+    public static void Main(string[] args) {
+        var fail: int = 0
+
+        // Servo: 90° → mid pulse 1500 µs = 1_500_000 ns; period 20 ms.
+        let p: FakePwm = new FakePwm()
+        let s: Servo = new Servo(p)
+        s.Write(90)
+        if (p.PeriodOf() == 20000000) { Console.WriteLine("[PASS] servo period 50Hz") } else { Console.WriteLine("[FAIL] servo period"); fail = fail + 1 }
+        if (p.DutyOf() == 1500000) { Console.WriteLine("[PASS] servo 90deg = 1.5ms") } else { Console.WriteLine("[FAIL] servo 90deg got " + String_FromInt(p.DutyOf())); fail = fail + 1 }
+        s.Write(0)
+        if (p.DutyOf() == 1000000) { Console.WriteLine("[PASS] servo 0deg = 1.0ms") } else { Console.WriteLine("[FAIL] servo 0deg"); fail = fail + 1 }
+
+        // Relay active-high.
+        let ro: FakeOut = new FakeOut()
+        let r: Relay = new Relay(ro)
+        r.On()
+        if (ro.StateOf() == 1) { Console.WriteLine("[PASS] relay on") } else { Console.WriteLine("[FAIL] relay on"); fail = fail + 1 }
+        r.Off()
+        if (ro.StateOf() == 0) { Console.WriteLine("[PASS] relay off") } else { Console.WriteLine("[FAIL] relay off"); fail = fail + 1 }
+
+        // Stepper: after 1 half-step from phase 0 → phase 1 (c1+c2 on).
+        let a: FakeOut = new FakeOut()
+        let b: FakeOut = new FakeOut()
+        let c: FakeOut = new FakeOut()
+        let d: FakeOut = new FakeOut()
+        let st: Stepper = new Stepper(a, b, c, d, new FakeClock())
+        st.Step(1, 0)
+        if (a.StateOf() == 1 && b.StateOf() == 1 && c.StateOf() == 0) { Console.WriteLine("[PASS] stepper phase1") } else { Console.WriteLine("[FAIL] stepper phase1"); fail = fail + 1 }
+        st.Release()
+        if (a.StateOf() == 0 && b.StateOf() == 0) { Console.WriteLine("[PASS] stepper release") } else { Console.WriteLine("[FAIL] stepper release"); fail = fail + 1 }
+
+        if (fail == 0) { Console.WriteLine("motor: all good") }
+    }
+}
